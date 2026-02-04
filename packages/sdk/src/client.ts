@@ -1,6 +1,6 @@
 import { AnchorProvider, BN, Program, web3 } from "@coral-xyz/anchor";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { AgentReputationView, CreateJobArgs, RateJobArgs, VerifyType } from "./types";
+import { AgentReputationView, CreateJobArgs, JobView, RateJobArgs, VerifyType } from "./types";
 import {
   arbiterPda,
   arbiterVaultPda,
@@ -35,11 +35,15 @@ export class TrustNetClient {
     this.program = new Program(IDL, opts.programId ?? PROGRAM_ID, provider);
   }
 
-  async initReputation(stakeLamports: bigint): Promise<PublicKey> {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Reputation
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async initReputation(stakeLamports: bigint, specializations: number[] = []): Promise<PublicKey> {
     const [reputation] = reputationPda(this.wallet.publicKey);
     const [repVault] = repVaultPda(this.wallet.publicKey);
     await this.program.methods
-      .initReputation(new BN(stakeLamports.toString()), [])
+      .initReputation(new BN(stakeLamports.toString()), specializations)
       .accounts({
         agent: this.wallet.publicKey,
         reputation,
@@ -97,9 +101,31 @@ export class TrustNetClient {
     else if (stakeSol >= 10) base += 5;
     else if (stakeSol >= 1) base += 2;
     const daysInactive = Math.floor((nowTs - view.lastActive) / 86_400);
-    const multiplier = daysInactive <= 30 ? 1 : daysInactive <= 90 ? 0.95 : daysInactive <= 180 ? 0.9 : daysInactive <= 360 ? 0.8 : 0.7;
+    const multiplier =
+      daysInactive <= 30 ? 1 : daysInactive <= 90 ? 0.95 : daysInactive <= 180 ? 0.9 : daysInactive <= 360 ? 0.8 : 0.7;
     const adjusted = Math.floor(base * multiplier);
     return Math.max(0, Math.min(100, adjusted));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Jobs
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async getJob(jobPubkey: PublicKey): Promise<JobView> {
+    const account: any = await this.program.account.jobEscrow.fetch(jobPubkey);
+    return {
+      jobId: new Uint8Array(account.jobId),
+      client: account.client,
+      provider: account.provider,
+      amount: BigInt(account.amount.toString()),
+      providerStake: BigInt(account.providerStake.toString()),
+      deadline: account.deadline.toNumber(),
+      status: account.status,
+      verificationType: account.verificationType,
+      createdAt: account.createdAt.toNumber(),
+      submittedAt: account.submittedAt?.toNumber() ?? null,
+      completedAt: account.completedAt?.toNumber() ?? null,
+    };
   }
 
   async createJob(args: CreateJobArgs): Promise<{ job: PublicKey; vault: PublicKey }> {
@@ -147,7 +173,12 @@ export class TrustNetClient {
       .rpc();
   }
 
-  async approveCompletion(job: PublicKey): Promise<string> {
+  /**
+   * Approve job completion (client only). Pays out to provider.
+   * @param job - Job PDA
+   * @param provider - Provider pubkey (receives payout)
+   */
+  async approveCompletion(job: PublicKey, provider: PublicKey): Promise<string> {
     const [vault] = jobVaultPda(job);
     const [treasury] = treasuryPda();
     return this.program.methods
@@ -157,13 +188,20 @@ export class TrustNetClient {
         job,
         jobVault: vault,
         treasury,
-        provider: this.wallet.publicKey,
+        provider,
         systemProgram: web3.SystemProgram.programId,
       })
       .rpc();
   }
 
-  async oracleVerify(job: PublicKey, approved: boolean, notesHash: Uint8Array): Promise<string> {
+  /**
+   * Oracle verification of job completion.
+   * @param job - Job PDA
+   * @param provider - Provider pubkey (receives payout if approved)
+   * @param approved - Whether oracle approves the work
+   * @param notesHash - Hash of oracle notes
+   */
+  async oracleVerify(job: PublicKey, provider: PublicKey, approved: boolean, notesHash: Uint8Array): Promise<string> {
     const [vault] = jobVaultPda(job);
     const [treasury] = treasuryPda();
     return this.program.methods
@@ -173,13 +211,19 @@ export class TrustNetClient {
         job,
         jobVault: vault,
         treasury,
-        provider: this.wallet.publicKey,
+        provider,
         systemProgram: web3.SystemProgram.programId,
       })
       .rpc();
   }
 
-  async expireJob(job: PublicKey): Promise<string> {
+  /**
+   * Expire a job (permissionless after deadline).
+   * @param job - Job PDA
+   * @param client - Client pubkey (receives refund if job was active)
+   * @param provider - Provider pubkey (receives payout if DeadlineAuto + submitted)
+   */
+  async expireJob(job: PublicKey, client: PublicKey, provider: PublicKey): Promise<string> {
     const [vault] = jobVaultPda(job);
     const [treasury] = treasuryPda();
     return this.program.methods
@@ -188,12 +232,16 @@ export class TrustNetClient {
         job,
         jobVault: vault,
         treasury,
-        client: this.wallet.publicKey,
-        provider: this.wallet.publicKey,
+        client,
+        provider,
         systemProgram: web3.SystemProgram.programId,
       })
       .rpc();
   }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Disputes
+  // ─────────────────────────────────────────────────────────────────────────────
 
   async raiseDispute(job: PublicKey, reasonBytes: Uint8Array, evidenceHash: Uint8Array): Promise<PublicKey> {
     const [dispute] = disputePda(job);
@@ -243,11 +291,32 @@ export class TrustNetClient {
       .rpc();
   }
 
-  async resolveDispute(dispute: PublicKey): Promise<string> {
+  /**
+   * Resolve a dispute after voting. Permissionless.
+   * @param dispute - Dispute PDA
+   * @param client - Client pubkey (receives payout if they win)
+   * @param provider - Provider pubkey (receives payout if they win)
+   * @param arbiterAccounts - Array of arbiter remaining accounts (arbiter, arbiterVault, voteCommitment, authority) per arbiter
+   */
+  async resolveDispute(
+    dispute: PublicKey,
+    client: PublicKey,
+    provider: PublicKey,
+    arbiterAccounts: { arbiter: PublicKey; arbiterVault: PublicKey; voteCommitment: PublicKey; authority: PublicKey }[] = []
+  ): Promise<string> {
+    const disputeData = await this.program.account.dispute.fetch(dispute);
+    const job = disputeData.job as PublicKey;
     const [disputeVault] = disputeVaultPda(dispute);
-    const job = (await this.program.account.dispute.fetch(dispute)).job as PublicKey;
     const [jobVault] = jobVaultPda(job);
     const [treasury] = treasuryPda();
+
+    const remainingAccounts = arbiterAccounts.flatMap((a) => [
+      { pubkey: a.arbiter, isSigner: false, isWritable: true },
+      { pubkey: a.arbiterVault, isSigner: false, isWritable: true },
+      { pubkey: a.voteCommitment, isSigner: false, isWritable: false },
+      { pubkey: a.authority, isSigner: false, isWritable: true },
+    ]);
+
     return this.program.methods
       .resolveDispute()
       .accounts({
@@ -256,12 +325,17 @@ export class TrustNetClient {
         jobVault,
         disputeVault,
         treasury,
-        client: this.wallet.publicKey,
-        provider: this.wallet.publicKey,
+        client,
+        provider,
         systemProgram: web3.SystemProgram.programId,
       })
+      .remainingAccounts(remainingAccounts)
       .rpc();
   }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Ratings
+  // ─────────────────────────────────────────────────────────────────────────────
 
   async rateJob(job: PublicKey, args: RateJobArgs): Promise<string> {
     const [rating] = ratingPda(args.jobId, this.wallet.publicKey);
@@ -278,11 +352,15 @@ export class TrustNetClient {
       .rpc();
   }
 
-  async registerArbiter(stakeLamports: bigint): Promise<PublicKey> {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Arbiters
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async registerArbiter(stakeLamports: bigint, specializations: number[] = []): Promise<PublicKey> {
     const [arbiter] = arbiterPda(this.wallet.publicKey);
     const [arbiterVault] = arbiterVaultPda(this.wallet.publicKey);
     await this.program.methods
-      .registerArbiter(new BN(stakeLamports.toString()), [])
+      .registerArbiter(new BN(stakeLamports.toString()), specializations)
       .accounts({
         authority: this.wallet.publicKey,
         arbiter,
@@ -292,6 +370,10 @@ export class TrustNetClient {
       .rpc();
     return arbiter;
   }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Helpers
+  // ─────────────────────────────────────────────────────────────────────────────
 
   private mapVerifyType(verifyType: VerifyType): any {
     switch (verifyType) {

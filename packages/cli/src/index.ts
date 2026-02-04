@@ -20,9 +20,8 @@ program
 program
   .command("dispute-path")
   .description("Run a dispute-path flow on localnet")
-  .option("--winner <winner>", "provider|client", "provider")
-  .action(async (opts) => {
-    await runDisputePath(opts.winner as "provider" | "client");
+  .action(async () => {
+    await runDisputePath();
   });
 
 program
