@@ -17,22 +17,29 @@ import {
 } from "./pda";
 import { voteHash } from "./instructions";
 
+// Minimal IDL stub - replace with generated IDL from `anchor build`
 const IDL: any = {
   version: "0.1.0",
   name: "trustnet",
+  address: PROGRAM_ID.toBase58(),
   instructions: [],
+  accounts: [],
 };
 
 export class TrustNetClient {
   readonly connection: Connection;
   readonly wallet: AnchorProvider["wallet"];
   readonly program: Program;
+  readonly programId: PublicKey;
 
   constructor(opts: { connection: Connection; wallet: AnchorProvider["wallet"]; programId?: PublicKey }) {
     this.connection = opts.connection;
     this.wallet = opts.wallet;
+    this.programId = opts.programId ?? PROGRAM_ID;
     const provider = new AnchorProvider(opts.connection, opts.wallet, {});
-    this.program = new Program(IDL, opts.programId ?? PROGRAM_ID, provider);
+    // Build IDL with correct program address
+    const idl = { ...IDL, address: this.programId.toBase58() };
+    this.program = new Program(idl, provider);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -70,7 +77,8 @@ export class TrustNetClient {
 
   async getReputation(agent: PublicKey): Promise<AgentReputationView> {
     const [reputation] = reputationPda(agent);
-    const account: any = await this.program.account.agentReputation.fetch(reputation);
+    // Note: requires IDL with account definitions. Cast to any for stub IDL.
+    const account: any = await (this.program.account as any).agentReputation.fetch(reputation);
     return {
       agent: account.agent,
       totalJobsCompleted: BigInt(account.totalJobsCompleted.toString()),
@@ -112,7 +120,8 @@ export class TrustNetClient {
   // ─────────────────────────────────────────────────────────────────────────────
 
   async getJob(jobPubkey: PublicKey): Promise<JobView> {
-    const account: any = await this.program.account.jobEscrow.fetch(jobPubkey);
+    // Note: requires IDL with account definitions. Cast to any for stub IDL.
+    const account: any = await (this.program.account as any).jobEscrow.fetch(jobPubkey);
     return {
       jobId: new Uint8Array(account.jobId),
       client: account.client,
@@ -304,7 +313,8 @@ export class TrustNetClient {
     provider: PublicKey,
     arbiterAccounts: { arbiter: PublicKey; arbiterVault: PublicKey; voteCommitment: PublicKey; authority: PublicKey }[] = []
   ): Promise<string> {
-    const disputeData = await this.program.account.dispute.fetch(dispute);
+    // Note: requires IDL with account definitions. Cast to any for stub IDL.
+    const disputeData = await (this.program.account as any).dispute.fetch(dispute);
     const job = disputeData.job as PublicKey;
     const [disputeVault] = disputeVaultPda(dispute);
     const [jobVault] = jobVaultPda(job);
