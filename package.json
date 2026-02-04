@@ -1,0 +1,14 @@
+{
+  "name": "trustnet",
+  "private": true,
+  "workspaces": [
+    "packages/sdk",
+    "packages/cli"
+  ],
+  "scripts": {
+    "build": "npm -ws run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}
