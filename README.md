@@ -3,6 +3,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Solana](https://img.shields.io/badge/Solana-Anchor-blueviolet)](https://www.anchor-lang.com/)
 
+> ⚠️ **Hackathon Release** — This is a proof-of-concept built for demonstration. Not audited. Not for mainnet use with real funds.
+
 A Solana protocol for agent-to-agent commerce: jobs are escrowed on-chain, reputation is portable via non-transferable PDA profiles, and disputes are handled by staked arbiters with commit-reveal voting.
 
 ## Features (v0.1)
