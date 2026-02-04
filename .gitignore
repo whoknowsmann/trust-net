@@ -1,0 +1,39 @@
+# Anchor / Solana
+target/
+.anchor/
+test-ledger/
+*.so
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Package managers
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build artifacts
+*.log
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Keys (never commit wallets/keypairs)
+*-keypair.json
+id.json
+deploy-keypair.json
+
+# Temporary
+tmp/
+.cache/
