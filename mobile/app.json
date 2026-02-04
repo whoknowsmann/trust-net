@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "TrustNet Mobile",
+    "slug": "trustnet-mobile",
+    "jsEngine": "hermes",
+    "android": {
+      "package": "com.trustnet.mobile"
+    }
+  }
+}
